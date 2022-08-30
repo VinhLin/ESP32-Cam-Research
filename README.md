@@ -10,31 +10,28 @@ Test and Research ESP32-Cam
 
 ## [Library ESP32-Cam](https://registry.platformio.org/search?q=esp32-cam)
 
-------------------------------------------------------------------------------------------------
-## Note
-- Khi dùng **ESP32-Cam** dùng các library cho **PlatformIO**.
-- Lúc build ra thì nó bị lỗi.
-- Khi search thì nguyên nhân là phiên bản **arduino-esp32** thấp, cần nâng cấp.
-
-### [Tham khảo cách khắc phục](https://community.platformio.org/t/how-to-use-the-newest-version-of-espressif-arduino-esp32/24649)
-- Mình thử như sau: Trước hết là update **Platform của ESP32** lên **version 5.0.0**
-- Vô **Pio HOME** -> **Platforms** -> **Updates** -> Update Espressif 32.
-- Sau khi trong project ESP32-Cam, mình sửa file **platformio.ini** như sau:
+-----------------------------------------------------------------------------------------------
+### VC0706-Serial-Camera
 ```
-[env:esp32cam]
-platform = https://github.com/platformio/platform-espressif32.git#feature/arduino-idf-master
-board = esp32cam
-framework = arduino
-platform_packages =
-   framework-arduinoespressif32 @ https://github.com/espressif/arduino-esp32.git#2.0.1
-lib_deps = 
-    yoursunny/esp32cam@^0.0.20220612
-    ottowinter/ESPAsyncWebServer-esphome@^2.1.0
+https://learn.adafruit.com/ttl-serial-camera/arduino-usage
+https://registry.platformio.org/libraries/adafruit/Adafruit%20VC0706%20Serial%20Camera%20Library
+https://github.com/adafruit/Adafruit-VC0706-Serial-Camera-Library
 ```
 
+----------------------------------------------------------------------------------------------
+## Giải thích cơ cấu hoạt động
+- **ESP32-Cam** là một WebServer và đóng vai trò là một **wifi access point** luôn trong trạng thái hoạt động.
+```
+ssid: ESP32-Cam-Wifi
+pass: 123456789
+```
+- Khi truy cập vào wifi AP này thì mình có thể xem **live video**.
+- Mình có một con ESP32-Uno để capture ảnh từ ESP32-Cam. 
+> Mục tiêu là con ESP32-Uno này sẽ được gắn với các cảm biến khác, xử lý thêm nhiều tác vụ khác.
+> Giả sử có một trigger nào đó xảy ra, mình sẽ chủ động capture ảnh lại và lưu vào SPIFFS của ESP32-Uno.
 
-
-
-
-
-
+### Kết quả test
+- ESP32-Uno đóng vai trò là một *client*, kết nối với wifi AP của ESP32-Cam.
+- Khi cần capture ảnh thì sẽ trỏ đến `http://192.168.4.1/640x480.jpg`
+- Và lưu dữ liệu ảnh này vào trong SPIFFS.
+- **Đã test thành công**.

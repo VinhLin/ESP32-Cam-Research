@@ -1,22 +1,9 @@
 #include <Arduino.h>
 
-// #define _TASK_TIMECRITICAL      // Enable monitoring scheduling overruns
-#define _TASK_SLEEP_ON_IDLE_RUN // Enable 1 ms SLEEP_IDLE powerdowns between tasks if no callback methods were invoked during the pass
-//#define _TASK_STATUS_REQUEST    // Compile with support for StatusRequest functionality - triggering tasks on status change events in addition to time only
-// #define _TASK_WDT_IDS           // Compile with support for wdt control points and task ids
-// #define _TASK_LTS_POINTER       // Compile with support for local task storage pointer
-// #define _TASK_PRIORITY          // Support for layered scheduling priority
-// #define _TASK_MICRO_RES         // Support for microsecond resolution
-// #define _TASK_STD_FUNCTION      // Support for std::function (ESP8266 ONLY)
-// #define _TASK_DEBUG             // Make all methods and variables public for debug purposes
-// #define _TASK_INLINE         // Make all methods "inline" - needed to support some multi-tab, multi-file implementations
-#define _TASK_TIMEOUT
-
 #include <esp_task_wdt.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
-#include <TaskScheduler.h>
-#include "moduleSim_ThingsBoard.h"
+#include "SPIFFS.h"
 
 //*******************************************************Wifi****************************************************
 // Replace with your network credentials
@@ -26,8 +13,8 @@ const char *password = "123456789";
 // Your IP address or domain name with URL path
 const char *serverNameImage = "http://192.168.4.1/640x480.jpg";
 
-// count disconnect wifi
-int count_disconnect;
+// location save file
+String FILE_PHOTO = "/image/photo.jpg";
 
 //*************************************************Defines Value*********************************************
 // 45 seconds WDT
@@ -36,21 +23,12 @@ int count_disconnect;
 // define baud rate port
 #define BAUD_RATE_Debug 115200
 
-// define account ThingsBoard
-#define THINGSBOARD_SERVER "thingsboard.cloud"
-#define TOKEN "a2NqWYATG2uTSBuz3ZPD"
-
 //**************************************************Functions***************************************************
 void initConnectWifi(const char *id, const char *pass);
-String httpGETRequest(const char *serverName);
-String getImage();
-void sendJsonDataAPICallback();
-
-//**************************************************Tasks*******************************************************
-Scheduler ts;
-// Sample code: https://github.com/arkhipenko/TaskScheduler/blob/master/examples/Scheduler_example02/Scheduler_example02.ino
-// https://github.com/arkhipenko/TaskScheduler/blob/master/examples/Scheduler_example17_Timeout/Scheduler_example17_Timeout.ino
-Task taskSendImageData(45 * TASK_SECOND, TASK_FOREVER, &sendJsonDataAPICallback, &ts, true);
+void initSPIFFSToSaveImage();
+void listDir(String dir);
+void removeLogFile(String log_name);
+void downloadAndSaveFile(String fileName, String url);
 
 void setup()
 {
@@ -64,15 +42,15 @@ void setup()
     // init connect wifi
     initConnectWifi(ssid, password);
 
-    // set point-in-time for scheduling start
-    ts.startNow();
+    // init SPIFFS
+    initSPIFFSToSaveImage();
+
+    // download image and save to flash SPIFFS
+    downloadAndSaveFile(FILE_PHOTO, serverNameImage);
 }
 
 void loop()
 {
-    // init TaskScheduler
-    ts.execute();
-
     // Reset WDT
     esp_task_wdt_reset();
 }
@@ -108,82 +86,122 @@ void initConnectWifi(const char *id, const char *pass)
     Serial.println(WiFi.localIP());
 }
 
-// httpGETRequest http GET Request to web server
-String httpGETRequest(const char *serverName)
+// initSPIFFSToSaveImage init SPIFFS to save Image
+void initSPIFFSToSaveImage()
 {
-    WiFiClient client;
+    long file_size;
+
+    // init SPIFFS on ESP32
+    if (!SPIFFS.begin(true))
+    {
+        Serial.println("An Error has occurred while mounting SPIFFS");
+        ESP.restart();
+        return;
+    }
+    Serial.print("Total Bytes of SPIFFS: ");
+    Serial.println(SPIFFS.totalBytes());
+
+    // list all dir in SPIFFS
+    listDir("/");
+
+    // check file size
+    file_size = SPIFFS.usedBytes();
+    Serial.print("File Size: ");
+    Serial.println(file_size);
+    if (file_size >= 500000)
+    {
+        // del file if file_size >= 500KB
+        Serial.println("Remove file.");
+        removeLogFile(FILE_PHOTO);
+    }
+}
+
+// listDir list dir in SPIFFS
+//  listDir("/") -> list all dir in SPIFFS
+void listDir(String dir)
+{
+    File root = SPIFFS.open(dir);
+
+    File file = root.openNextFile();
+
+    while (file)
+    {
+        Serial.print("FILE: ");
+        Serial.println(file.name());
+
+        file = root.openNextFile();
+    }
+}
+
+// removeLogFile remove log file
+void removeLogFile(String log_name)
+{
+    SPIFFS.remove(log_name);
+}
+
+//downloadAndSaveFile download and save file to SPIFFS
+void downloadAndSaveFile(String fileName, String url)
+{
     HTTPClient http;
 
-    // Your Domain name with URL path or IP address with path
-    http.begin(client, serverName);
+    Serial.println("[HTTP] begin...\n");
+    Serial.println(fileName);
+    Serial.println(url);
+    http.begin(url);
 
-    // Send HTTP POST request
-    int httpResponseCode = http.GET();
-
-    String payload = "";
-
-    if (httpResponseCode > 0)
+    Serial.printf("[HTTP] GET...\n", url.c_str());
+    // start connection and send HTTP header
+    int httpCode = http.GET();
+    if (httpCode > 0)
     {
-        Serial.print("HTTP Response code: ");
-        Serial.println(httpResponseCode);
-        payload = http.getString();
-    }
-    else
-    {
-        Serial.print("Error code: ");
-        Serial.println(httpResponseCode);
-    }
-    // Free resources
-    http.end();
+        // HTTP header has been send and Server response header has been handled
+        Serial.printf("[HTTP] GET... code: %d\r\n", httpCode);
 
-    return payload;
-}
-
-String getImage()
-{
-    String image_data;
-
-    if (WiFi.status() == WL_CONNECTED)
-    {
-        // Get data
-        image_data = httpGETRequest(serverNameImage);
-
-        // debug
-        Serial.printf("image_data: %s\r\n", image_data.c_str());
-    }
-    else
-    {
-        // count disconnect wifi
-        count_disconnect++;
-        Serial.printf("Disconnect Wifi Access Point %d time.\r\n", count_disconnect);
-    }
-
-    return image_data;
-}
-
-// sendJsonDataAPICallback send json data API Callback
-void sendJsonDataAPICallback()
-{
-    String data;
-    // get data image
-    data = getImage();
-
-    if (count_disconnect == 3)
-    {
-        // reconnect wifi
-        initConnectWifi(ssid, password);
-        count_disconnect = 0;
-    }
-
-    // send data to ThingsBoard
-    if (data != "")
-    {
-        if (!connectThingsBoardPlatform(THINGSBOARD_SERVER, TOKEN))
+        File file = SPIFFS.open(fileName, FILE_WRITE);
+        if (!file)
         {
-            showInformationModuleSim();
+            Serial.println("Failed to open file in writing mode");
+            Serial.println("Maybe not enough space");
             return;
         }
 
-        sendDataToThingsBoardPlatform(data);
+        // file found at server
+        if (httpCode == HTTP_CODE_OK)
+        {
+            // get lenght of document (is -1 when Server sends no Content-Length header)
+            int len = http.getSize();
+
+            // create buffer for read
+            uint8_t buff[128] = {0};
+
+            // get tcp stream
+            WiFiClient *stream = http.getStreamPtr();
+
+            // read all data from server
+            while (http.connected() && (len > 0 || len == -1))
+            {
+                // get available data size
+                size_t size = stream->available();
+                if (size)
+                {
+                    // read up to 128 byte
+                    int c = stream->readBytes(buff, ((size > sizeof(buff)) ? sizeof(buff) : size));
+                    // write it to Serial
+                    // Serial.write(buff, c);
+                    file.write(buff, c);
+                    if (len > 0)
+                    {
+                        len -= c;
+                    }
+                }
+                delay(1);
+            }
+
+            Serial.println();
+            Serial.println("[HTTP] connection closed or file end.\n");
+            Serial.println("[FILE] closing file\n");
+            file.close();
+        }
     }
+    http.end();
 }
